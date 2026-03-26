@@ -28,9 +28,9 @@ def get_db():
     finally:
         db.close()
 
-@app.get("/health")
-def health_check():
-    return {"status": "healthy"}
+@app.get("/")
+def root():
+    return {"message": "API running"}
 
 @app.post("/feedback", response_model=FeedbackResponse)
 def create_feedback(payload: FeedbackCreate, db: Session = Depends(get_db)):
