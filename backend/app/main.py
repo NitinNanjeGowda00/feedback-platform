@@ -15,7 +15,7 @@ app = FastAPI(title="Feedback Application API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["https://feedback-platform-neon.vercel.app"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
