@@ -9,10 +9,12 @@ python-multipart==0.0.22
 numpy==1.26.4
 pandas==2.2.2
 
-# Lightweight ML
+# ML
 scikit-learn==1.4.2
 joblib==1.4.2
 
-# Sentence embeddings (CPU only)
+# Embeddings
 sentence-transformers==2.2.2
-torch==2.2.2+cpu --extra-index-url https://download.pytorch.org/whl/cpu
+
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.2.2+cpu
