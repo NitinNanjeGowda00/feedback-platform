@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
+import { createSessionToken, ADMIN_COOKIE_NAME, SESSION_TTL_SECONDS } from "../_auth";
 
 export async function POST(req: NextRequest) {
     try {
-        const body = await req.json();
+        const body = await req.json().catch(() => ({}));
         const password = String(body?.password ?? "");
 
         if (!process.env.ADMIN_PASSWORD) {
@@ -20,20 +21,16 @@ export async function POST(req: NextRequest) {
         }
 
         const response = NextResponse.json({ authenticated: true });
-
-        response.cookies.set("admin_session", "true", {
+        response.cookies.set(ADMIN_COOKIE_NAME, createSessionToken(), {
             httpOnly: true,
             sameSite: "lax",
-            secure: false,
+            secure: process.env.NODE_ENV === "production",
             path: "/",
-            maxAge: 60 * 60 * 8,
+            maxAge: SESSION_TTL_SECONDS,
         });
 
         return response;
     } catch {
-        return NextResponse.json(
-            { message: "Invalid request." },
-            { status: 400 }
-        );
+        return NextResponse.json({ message: "Invalid request." }, { status: 400 });
     }
 }

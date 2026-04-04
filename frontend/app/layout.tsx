@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import type { ReactNode } from "react";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
@@ -14,11 +15,11 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: {
-    default: "Feedback App",
-    template: "%s | Feedback App",
+    default: "AI Feedback Intelligence",
+    template: "%s | AI Feedback Intelligence",
   },
   description:
-    "A private feedback app for collecting real work struggles and improving workflows.",
+    "A secure AI feedback platform that collects user pain points, tracks outreach, and turns submissions into actionable intelligence.",
   icons: {
     icon: "/favicon.ico",
   },
@@ -26,9 +27,9 @@ export const metadata: Metadata = {
 
 export default function RootLayout({
   children,
-}: Readonly<{
-  children: React.ReactNode;
-}>) {
+}: {
+  children: ReactNode;
+}) {
   return (
     <html
       lang="en"

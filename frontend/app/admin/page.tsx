@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 
 type FeedbackEntry = {
     id: number;
@@ -11,10 +11,48 @@ type FeedbackEntry = {
     tools_used: string;
     pain_points: string;
     new_tool: string;
+    category?: string | null;
+    sentiment_label?: string | null;
+    sentiment_score?: number | null;
+    summary?: string | null;
     created_at: string;
 };
 
 type SortMode = "newest" | "oldest";
+
+type AnalyticsSummary = {
+    total_responses: number;
+    page_views: number;
+    submissions: number;
+    conversion_rate: number;
+    unique_companies: number;
+    unique_roles: number;
+    top_issues: { label: string; count: number }[];
+    daily_visits: { date: string; count: number }[];
+    latest_submission: string | null;
+};
+
+type InsightSummary = {
+    summary: string;
+    recommendations: string[];
+    top_categories: { label: string; count: number }[];
+    sample_highlights: string[];
+};
+
+type SearchResponse = {
+    answer: string;
+    matches: Array<{
+        id: number;
+        score: number;
+        category?: string | null;
+        summary?: string | null;
+        snippet: string;
+        created_at: string;
+        name?: string;
+        role?: string;
+        company?: string;
+    }>;
+};
 
 export default function AdminPage() {
     const [checkingSession, setCheckingSession] = useState(true);
@@ -25,16 +63,22 @@ export default function AdminPage() {
     const [loginLoading, setLoginLoading] = useState(false);
 
     const [data, setData] = useState<FeedbackEntry[]>([]);
+    const [analytics, setAnalytics] = useState<AnalyticsSummary | null>(null);
+    const [insights, setInsights] = useState<InsightSummary | null>(null);
+    const [searchResult, setSearchResult] = useState<SearchResponse | null>(null);
+
     const [dataLoading, setDataLoading] = useState(false);
+    const [searchLoading, setSearchLoading] = useState(false);
     const [error, setError] = useState("");
 
     const [search, setSearch] = useState("");
     const [sortMode, setSortMode] = useState<SortMode>("newest");
     const [refreshing, setRefreshing] = useState(false);
     const [logoutLoading, setLogoutLoading] = useState(false);
+    const [ragQuery, setRagQuery] = useState("");
 
     useEffect(() => {
-        checkSession();
+        void checkSession();
     }, []);
 
     const checkSession = async () => {
@@ -47,7 +91,7 @@ export default function AdminPage() {
 
             if (json?.authenticated) {
                 setAuthorized(true);
-                await loadData();
+                await loadAllData();
             } else {
                 setAuthorized(false);
             }
@@ -58,22 +102,28 @@ export default function AdminPage() {
         }
     };
 
-    const loadData = async () => {
+    const loadAllData = async () => {
         setDataLoading(true);
         setError("");
 
         try {
-            const res = await fetch(
-                `${process.env.NEXT_PUBLIC_API_BASE_URL}/feedback`,
-                { cache: "no-store" }
-            );
+            const [feedbackRes, analyticsRes, insightsRes] = await Promise.all([
+                fetch("/api/admin/feedback", { cache: "no-store" }),
+                fetch("/api/admin/analytics", { cache: "no-store" }),
+                fetch("/api/admin/insights", { cache: "no-store" }),
+            ]);
 
-            if (!res.ok) {
-                throw new Error("Failed to load feedback submissions.");
-            }
+            if (!feedbackRes.ok) throw new Error("Failed to load feedback submissions.");
+            if (!analyticsRes.ok) throw new Error("Failed to load analytics.");
+            if (!insightsRes.ok) throw new Error("Failed to load insights.");
 
-            const json: FeedbackEntry[] = await res.json();
-            setData(json);
+            const feedbackJson: FeedbackEntry[] = await feedbackRes.json();
+            const analyticsJson: AnalyticsSummary = await analyticsRes.json();
+            const insightsJson: InsightSummary = await insightsRes.json();
+
+            setData(feedbackJson);
+            setAnalytics(analyticsJson);
+            setInsights(insightsJson);
         } catch (err) {
             setError(err instanceof Error ? err.message : "Something went wrong");
         } finally {
@@ -82,7 +132,7 @@ export default function AdminPage() {
         }
     };
 
-    const handleLogin = async (e: React.FormEvent) => {
+    const handleLogin = async (e: FormEvent) => {
         e.preventDefault();
         setLoginLoading(true);
         setLoginError("");
@@ -104,7 +154,7 @@ export default function AdminPage() {
 
             setAuthorized(true);
             setPassword("");
-            await loadData();
+            await loadAllData();
         } catch (err) {
             setLoginError(err instanceof Error ? err.message : "Login failed");
         } finally {
@@ -119,7 +169,11 @@ export default function AdminPage() {
             setAuthorized(false);
             setPassword("");
             setData([]);
+            setAnalytics(null);
+            setInsights(null);
+            setSearchResult(null);
             setSearch("");
+            setRagQuery("");
             setSortMode("newest");
         } finally {
             setLogoutLoading(false);
@@ -128,7 +182,36 @@ export default function AdminPage() {
 
     const handleRefresh = async () => {
         setRefreshing(true);
-        await loadData();
+        await loadAllData();
+    };
+
+    const handleSemanticSearch = async () => {
+        const query = ragQuery.trim();
+        if (!query) return;
+
+        setSearchLoading(true);
+        setError("");
+
+        try {
+            const res = await fetch("/api/admin/search", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({ query, k: 5 }),
+            });
+
+            if (!res.ok) {
+                throw new Error("Semantic search failed.");
+            }
+
+            const json: SearchResponse = await res.json();
+            setSearchResult(json);
+        } catch (err) {
+            setError(err instanceof Error ? err.message : "Search failed");
+        } finally {
+            setSearchLoading(false);
+        }
     };
 
     const filteredAndSorted = useMemo(() => {
@@ -142,9 +225,12 @@ export default function AdminPage() {
                 item.email.toLowerCase().includes(q) ||
                 item.role.toLowerCase().includes(q) ||
                 item.company.toLowerCase().includes(q) ||
+                (item.category || "").toLowerCase().includes(q) ||
+                (item.sentiment_label || "").toLowerCase().includes(q) ||
                 item.tools_used.toLowerCase().includes(q) ||
                 item.pain_points.toLowerCase().includes(q) ||
-                item.new_tool.toLowerCase().includes(q)
+                item.new_tool.toLowerCase().includes(q) ||
+                (item.summary || "").toLowerCase().includes(q)
             );
         });
 
@@ -160,8 +246,7 @@ export default function AdminPage() {
         const companies = new Set(
             data.map((item) => item.company.trim()).filter(Boolean)
         ).size;
-        const roles = new Set(data.map((item) => item.role.trim()).filter(Boolean))
-            .size;
+        const roles = new Set(data.map((item) => item.role.trim()).filter(Boolean)).size;
         const latest =
             data.length > 0
                 ? new Date(
@@ -261,16 +346,21 @@ export default function AdminPage() {
                             </div>
 
                             <h1 className="mt-4 text-4xl font-black tracking-tight text-slate-950 sm:text-5xl">
-                                Feedback submissions
+                                Feedback Intelligence Dashboard
                             </h1>
 
                             <p className="mt-4 max-w-2xl text-lg leading-8 text-slate-600">
-                                Review what people are struggling with, identify patterns, and
-                                export data for deeper analysis or follow-up.
+                                Review what people are struggling with, identify patterns, search semantically,
+                                and export data for deeper analysis or follow-up.
                             </p>
 
-                            <div className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                            <div className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
                                 <StatCard label="Total responses" value={stats.total} />
+                                <StatCard label="Page views" value={analytics?.page_views ?? "—"} />
+                                <StatCard
+                                    label="Conversion rate"
+                                    value={analytics ? `${analytics.conversion_rate}%` : "—"}
+                                />
                                 <StatCard label="Companies" value={stats.companies} />
                                 <StatCard label="Roles" value={stats.roles} />
                                 <StatCard label="Latest submission" value={stats.latest} compact />
@@ -279,7 +369,7 @@ export default function AdminPage() {
 
                         <div className="flex flex-col gap-3 lg:min-w-[240px] lg:items-end">
                             <a
-                                href={`${process.env.NEXT_PUBLIC_API_BASE_URL}/feedback/export`}
+                                href="/api/admin/export"
                                 className="inline-flex items-center justify-center rounded-2xl bg-slate-950 px-5 py-3 font-semibold text-white shadow-lg shadow-slate-900/10 transition hover:-translate-y-0.5 hover:bg-slate-800"
                             >
                                 Export CSV
@@ -302,27 +392,83 @@ export default function AdminPage() {
                         </div>
                     </div>
 
-                    <div className="mt-8 flex flex-col gap-3 lg:flex-row lg:items-center">
-                        <div className="flex-1">
-                            <input
-                                value={search}
-                                onChange={(e) => setSearch(e.target.value)}
-                                placeholder="Search name, company, role, tools, pain points..."
-                                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-indigo-500 focus:bg-white focus:ring-4 focus:ring-indigo-100"
-                            />
+                    <div className="mt-8 grid gap-6 lg:grid-cols-2">
+                        <div className="rounded-[1.75rem] border border-slate-200 bg-slate-50 p-5">
+                            <h2 className="text-lg font-bold text-slate-950">AI summary</h2>
+                            <p className="mt-3 text-sm leading-7 text-slate-600">
+                                {insights?.summary || "No insights available yet."}
+                            </p>
+
+                            <div className="mt-4 flex flex-wrap gap-2">
+                                {insights?.top_categories?.map((item) => (
+                                    <span
+                                        key={item.label}
+                                        className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-700 shadow-sm"
+                                    >
+                                        {item.label}: {item.count}
+                                    </span>
+                                ))}
+                            </div>
+
+                            <div className="mt-5">
+                                <h3 className="text-sm font-bold uppercase tracking-[0.15em] text-slate-500">
+                                    Recommendations
+                                </h3>
+                                <ul className="mt-3 space-y-2 text-sm leading-6 text-slate-700">
+                                    {(insights?.recommendations || []).map((item) => (
+                                        <li key={item} className="rounded-2xl bg-white px-4 py-3 shadow-sm">
+                                            {item}
+                                        </li>
+                                    ))}
+                                </ul>
+                            </div>
                         </div>
 
-                        <div className="flex gap-3">
-                            <SortButton
-                                active={sortMode === "newest"}
-                                onClick={() => setSortMode("newest")}
-                                label="Newest"
-                            />
-                            <SortButton
-                                active={sortMode === "oldest"}
-                                onClick={() => setSortMode("oldest")}
-                                label="Oldest"
-                            />
+                        <div className="rounded-[1.75rem] border border-slate-200 bg-slate-50 p-5">
+                            <h2 className="text-lg font-bold text-slate-950">Semantic search</h2>
+                            <p className="mt-2 text-sm text-slate-600">
+                                Ask a question and retrieve similar feedback with an AI-generated answer.
+                            </p>
+
+                            <div className="mt-4 flex flex-col gap-3 sm:flex-row">
+                                <input
+                                    value={ragQuery}
+                                    onChange={(e) => setRagQuery(e.target.value)}
+                                    placeholder='Try: "What do developers complain about?"'
+                                    className="flex-1 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-100"
+                                />
+                                <button
+                                    onClick={handleSemanticSearch}
+                                    disabled={searchLoading}
+                                    className="rounded-2xl bg-indigo-600 px-5 py-3 font-semibold text-white shadow-lg shadow-indigo-600/20 transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-70"
+                                >
+                                    {searchLoading ? "Searching..." : "Ask AI"}
+                                </button>
+                            </div>
+
+                            <div className="mt-5 rounded-2xl bg-white p-4 shadow-sm">
+                                <p className="text-sm font-bold text-slate-900">Answer</p>
+                                <p className="mt-2 text-sm leading-7 text-slate-600">
+                                    {searchResult?.answer || "Results will appear here."}
+                                </p>
+                            </div>
+
+                            <div className="mt-4">
+                                <p className="text-sm font-bold text-slate-900">Matching feedback</p>
+                                <div className="mt-3 space-y-3">
+                                    {(searchResult?.matches || []).map((match) => (
+                                        <div key={match.id} className="rounded-2xl bg-white p-4 shadow-sm">
+                                            <div className="flex flex-wrap items-center gap-2">
+                                                <span className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700">
+                                                    {match.category || "Other"}
+                                                </span>
+                                                <span className="text-xs text-slate-500">score {match.score}</span>
+                                            </div>
+                                            <p className="mt-2 text-sm leading-6 text-slate-700">{match.snippet}</p>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </section>
@@ -339,8 +485,7 @@ export default function AdminPage() {
                             <p className="font-semibold text-slate-800">
                                 {dataLoading
                                     ? "Loading..."
-                                    : `${filteredAndSorted.length} result${filteredAndSorted.length === 1 ? "" : "s"
-                                    }`}
+                                    : `${filteredAndSorted.length} result${filteredAndSorted.length === 1 ? "" : "s"}`}
                             </p>
                             <p className="text-sm text-slate-500">
                                 {search ? `Filtered by: "${search}"` : "Showing all submissions"}
@@ -378,6 +523,8 @@ export default function AdminPage() {
                                             "Email",
                                             "Role",
                                             "Company",
+                                            "Category",
+                                            "Sentiment",
                                             "Tools",
                                             "Pain Points",
                                             "New Tool",
@@ -410,6 +557,12 @@ export default function AdminPage() {
                                             </td>
                                             <td className="border-b border-slate-100 px-4 py-4 text-slate-600">
                                                 {item.company}
+                                            </td>
+                                            <td className="border-b border-slate-100 px-4 py-4 text-slate-600">
+                                                <Pill text={item.category || "Other"} />
+                                            </td>
+                                            <td className="border-b border-slate-100 px-4 py-4 text-slate-600">
+                                                <Pill text={item.sentiment_label || "neutral"} />
                                             </td>
                                             <td className="border-b border-slate-100 px-4 py-4 text-slate-600">
                                                 <CellText text={item.tools_used} />
@@ -448,8 +601,7 @@ function StatCard({
         <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 shadow-sm">
             <p className="text-sm text-slate-500">{label}</p>
             <p
-                className={`mt-1 font-black text-slate-950 ${compact ? "text-base" : "text-2xl"
-                    }`}
+                className={`mt-1 font-black text-slate-950 ${compact ? "text-base" : "text-2xl"}`}
             >
                 {value}
             </p>
@@ -471,8 +623,8 @@ function SortButton({
             type="button"
             onClick={onClick}
             className={`rounded-2xl px-4 py-3 font-semibold transition ${active
-                    ? "bg-indigo-600 text-white shadow-lg shadow-indigo-600/20"
-                    : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                ? "bg-indigo-600 text-white shadow-lg shadow-indigo-600/20"
+                : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
                 }`}
         >
             {label}
@@ -482,4 +634,12 @@ function SortButton({
 
 function CellText({ text }: { text: string }) {
     return <div className="max-w-[280px] whitespace-pre-wrap leading-6">{text}</div>;
+}
+
+function Pill({ text }: { text: string }) {
+    return (
+        <span className="inline-flex rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700">
+            {text}
+        </span>
+    );
 }

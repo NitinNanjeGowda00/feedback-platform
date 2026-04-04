@@ -1,15 +1,14 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
+import { ADMIN_COOKIE_NAME } from "../_auth";
 
-export async function POST(_req: NextRequest) {
+export async function POST() {
     const response = NextResponse.json({ success: true });
-
-    response.cookies.set("admin_session", "", {
+    response.cookies.set(ADMIN_COOKIE_NAME, "", {
         httpOnly: true,
         sameSite: "lax",
-        secure: false,
+        secure: process.env.NODE_ENV === "production",
         path: "/",
         maxAge: 0,
     });
-
     return response;
 }

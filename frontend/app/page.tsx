@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState, type ChangeEvent, type ChangeEventHandler, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 
 type FormData = {
@@ -29,34 +29,63 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  const handleChange = (
-    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
-  ) => {
+  useEffect(() => {
+    void trackVisit("page_view");
+  }, []);
+
+  const trackVisit = async (eventName: string) => {
+    try {
+      const payload = {
+        event_name: eventName,
+        path: "/",
+        referrer: document.referrer || "",
+      };
+
+      if (navigator.sendBeacon) {
+        const blob = new Blob([JSON.stringify(payload)], {
+          type: "application/json",
+        });
+        navigator.sendBeacon("http://127.0.0.1:8000/track", blob);
+        return;
+      }
+
+      await fetch("http://127.0.0.1:8000/track", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        keepalive: true,
+      });
+    } catch {
+      // tracking must never block the user flow
+    }
+  };
+
+  const handleChange = (e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
     setFormData((prev) => ({ ...prev, [name]: value }));
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError("");
 
     try {
-      const res = await fetch(
-        `${process.env.NEXT_PUBLIC_API_BASE_URL}/feedback`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(formData),
-        }
-      );
+      const res = await fetch("http://127.0.0.1:8000/feedback", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(formData),
+      });
 
       if (!res.ok) {
-        const data = await res.json();
+        const data = await res.json().catch(() => ({}));
         const message =
-          data?.detail?.[0]?.msg || data?.detail || "Failed to submit feedback";
+          data?.detail?.[0]?.msg ||
+          data?.detail ||
+          data?.message ||
+          "Failed to submit feedback";
         throw new Error(message);
       }
 
@@ -242,7 +271,7 @@ function Input({
   label: string;
   name: string;
   value: string;
-  onChange: React.ChangeEventHandler<HTMLInputElement>;
+  onChange: ChangeEventHandler<HTMLInputElement>;
   placeholder?: string;
   type?: string;
 }) {
@@ -272,7 +301,7 @@ function Textarea({
   label: string;
   name: string;
   value: string;
-  onChange: React.ChangeEventHandler<HTMLTextAreaElement>;
+  onChange: ChangeEventHandler<HTMLTextAreaElement>;
   placeholder?: string;
 }) {
   return (
