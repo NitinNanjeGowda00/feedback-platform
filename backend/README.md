@@ -18,7 +18,7 @@ Example PostgreSQL URL:
 postgresql+psycopg://postgres:postgres@localhost:5432/feedback_app
 ```
 
-Legacy `postgres://` URLs are normalized automatically.
+Legacy `postgres://` URLs are normalized automatically. If your host requires TLS, set `DATABASE_SSLMODE=require`.
 
 ### Migrations
 
@@ -26,6 +26,13 @@ Run schema migrations with:
 
 ```bash
 alembic upgrade head
+```
+
+Optional validation commands:
+
+```bash
+alembic current
+alembic heads
 ```
 
 Do not rely on startup schema creation in PostgreSQL mode. PostgreSQL runtime expects Alembic-managed schema.

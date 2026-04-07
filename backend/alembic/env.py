@@ -6,14 +6,19 @@ import os
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
+
+def get_database_url() -> str:
+    database_url = os.getenv("DATABASE_URL")
+    if not database_url:
+        raise RuntimeError("DATABASE_URL must be set before running Alembic migrations")
+    return normalize_database_url(database_url)
+
 from app.database import Base, normalize_database_url
 from app import models  # noqa: F401
 
 config = context.config
 
-database_url = os.getenv("DATABASE_URL")
-if database_url:
-    config.set_main_option("sqlalchemy.url", normalize_database_url(database_url))
+config.set_main_option("sqlalchemy.url", get_database_url())
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
@@ -29,6 +34,7 @@ def run_migrations_offline() -> None:
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
         compare_type=True,
+        compare_server_default=True,
     )
 
     with context.begin_transaction():
@@ -44,7 +50,12 @@ def run_migrations_online() -> None:
     )
 
     with connectable.connect() as connection:
-        context.configure(connection=connection, target_metadata=target_metadata, compare_type=True)
+        context.configure(
+            connection=connection,
+            target_metadata=target_metadata,
+            compare_type=True,
+            compare_server_default=True,
+        )
 
         with context.begin_transaction():
             context.run_migrations()

@@ -16,6 +16,12 @@ def normalize_database_url(raw_url: str) -> str:
         url = url.replace("postgres://", "postgresql+psycopg://", 1)
     elif url.startswith("postgresql://") and "+" not in url.split("://", 1)[0]:
         url = url.replace("postgresql://", "postgresql+psycopg://", 1)
+
+    sslmode = os.getenv("DATABASE_SSLMODE", "").strip()
+    if sslmode and url.startswith("postgresql+") and "sslmode=" not in url:
+        separator = "&" if "?" in url else "?"
+        url = f"{url}{separator}sslmode={sslmode}"
+
     return url
 
 
