@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState, type ChangeEvent, type ChangeEventHandler, type FormEvent } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
-type FormData = {
+type FeedbackFormData = {
   name: string;
   email: string;
   role: string;
@@ -13,246 +13,298 @@ type FormData = {
   new_tool: string;
 };
 
+type FeedbackResponse = FeedbackFormData & {
+  id: number;
+  category?: string | null;
+  sentiment_label?: string | null;
+  sentiment_score?: number | null;
+  summary?: string | null;
+  created_at: string;
+};
+
+type FieldErrors = Partial<Record<keyof FeedbackFormData, string>>;
+
+const initialFormData: FeedbackFormData = {
+  name: "",
+  email: "",
+  role: "",
+  company: "",
+  tools_used: "",
+  pain_points: "",
+  new_tool: "",
+};
+
+const fieldLabels: Record<keyof FeedbackFormData, string> = {
+  name: "Name",
+  email: "Email",
+  role: "Role",
+  company: "Company",
+  tools_used: "Tools you use",
+  pain_points: "Pain points",
+  new_tool: "Ideal solution",
+};
+
 export default function Home() {
   const router = useRouter();
 
-  const [formData, setFormData] = useState<FormData>({
-    name: "",
-    email: "",
-    role: "",
-    company: "",
-    tools_used: "",
-    pain_points: "",
-    new_tool: "",
-  });
-
+  const [formData, setFormData] = useState<FeedbackFormData>(initialFormData);
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
+  const [submitError, setSubmitError] = useState("");
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
+  const [lastSubmittedSignature, setLastSubmittedSignature] = useState("");
+  const [retryCount, setRetryCount] = useState(0);
 
-  useEffect(() => {
-    void trackVisit("page_view");
-  }, []);
+  const formCompletion = useMemo(() => {
+    const filled = Object.values(formData).filter((v) => v.trim()).length;
+    return Math.round((filled / Object.keys(formData).length) * 100);
+  }, [formData]);
 
-  const trackVisit = async (eventName: string) => {
-    try {
-      const payload = {
-        event_name: eventName,
-        path: "/",
-        referrer: document.referrer || "",
-      };
+  const submissionSignature = useMemo(
+    () => JSON.stringify(formData),
+    [formData]
+  );
 
-      if (navigator.sendBeacon) {
-        const blob = new Blob([JSON.stringify(payload)], {
-          type: "application/json",
-        });
-        navigator.sendBeacon("http://127.0.0.1:8000/track", blob);
-        return;
+  const validateForm = (data: FeedbackFormData) => {
+    const errors: FieldErrors = {};
+
+    for (const [key, value] of Object.entries(data) as [keyof FeedbackFormData, string][]) {
+      if (!value.trim()) {
+        errors[key] = `${fieldLabels[key]} is required.`;
       }
+    }
 
-      await fetch("http://127.0.0.1:8000/track", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-        keepalive: true,
-      });
-    } catch {
-      // tracking must never block the user flow
+    if (data.email.trim()) {
+      const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailPattern.test(data.email.trim())) {
+        errors.email = "Enter a valid email address.";
+      }
+    }
+
+    return errors;
+  };
+
+  const handleChange = (
+    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
+  ) => {
+    const { name, value } = e.target;
+    const key = name as keyof FeedbackFormData;
+
+    setFormData((current) => ({ ...current, [key]: value }));
+    setSubmitError("");
+
+    if (fieldErrors[key]) {
+      setFieldErrors((current) => ({ ...current, [key]: undefined }));
     }
   };
 
-  const handleChange = (e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-    const { name, value } = e.target;
-    setFormData((prev) => ({ ...prev, [name]: value }));
+  const submitFeedback = async (attempt = 0): Promise<FeedbackResponse> => {
+    const response = await fetch("/api/feedback", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(formData),
+    });
+
+    const responseText = await response.text();
+    const contentType = response.headers.get("content-type") || "";
+
+    let payload: any = null;
+    if (responseText) {
+      payload = contentType.includes("application/json")
+        ? JSON.parse(responseText)
+        : { message: responseText };
+    }
+
+    if (!response.ok) {
+      const message = payload?.message || payload?.detail || "Failed to submit feedback.";
+
+      if (response.status >= 500 && attempt === 0) {
+        setRetryCount(1);
+        return submitFeedback(1);
+      }
+
+      throw new Error(message);
+    }
+
+    return payload as FeedbackResponse;
   };
 
-  const handleSubmit = async (e: FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+
+    const errors = validateForm(formData);
+    setFieldErrors(errors);
+    setSubmitError("");
+    setRetryCount(0);
+
+    if (Object.keys(errors).length > 0) {
+      return;
+    }
+
+    if (loading) {
+      return;
+    }
+
+    if (lastSubmittedSignature === submissionSignature) {
+      setSubmitError("This feedback was already submitted. Please update the form before sending again.");
+      return;
+    }
+
     setLoading(true);
-    setError("");
 
     try {
-      const res = await fetch("http://127.0.0.1:8000/feedback", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(formData),
-      });
-
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        const message =
-          data?.detail?.[0]?.msg ||
-          data?.detail ||
-          data?.message ||
-          "Failed to submit feedback";
-        throw new Error(message);
-      }
-
-      router.push("/thank-you");
-    } catch (err: unknown) {
-      if (err instanceof Error) {
-        setError(err.message);
-      } else {
-        setError("Something went wrong");
-      }
+      const result = await submitFeedback();
+      setLastSubmittedSignature(submissionSignature);
+      router.push(`/thank-you?submissionId=${result.id}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to submit feedback.";
+      setSubmitError(message);
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <main className="min-h-screen bg-[radial-gradient(circle_at_top,rgba(99,102,241,0.12),transparent_35%),linear-gradient(to_bottom,#eff6ff,#ffffff_35%,#f8fafc)] px-4 py-10 text-slate-900">
-      <div className="mx-auto max-w-5xl">
-        <header className="mb-8 flex items-center justify-between rounded-3xl border border-white/60 bg-white/70 px-5 py-4 shadow-sm backdrop-blur">
+    <main className="relative min-h-screen overflow-hidden px-6 py-10">
+      <div className="absolute -top-20 left-10 h-72 w-72 rounded-full bg-indigo-500/30 blur-3xl float" />
+      <div className="absolute top-40 right-10 h-96 w-96 rounded-full bg-blue-500/30 blur-3xl float-slow" />
+
+      <div className="relative mx-auto max-w-7xl">
+        <section className="grid items-center gap-10 lg:grid-cols-2">
           <div>
-            <p className="text-sm font-semibold tracking-wide text-indigo-600">
-              Feedback App
-            </p>
-            <h1 className="text-lg font-bold sm:text-xl">
-              Share your daily work struggles
-            </h1>
-          </div>
+            <div className="flex items-center gap-4">
+              <div className="glow flex h-16 w-16 items-center justify-center rounded-3xl bg-gradient-to-br from-indigo-500 to-blue-600 text-2xl font-bold">
+                AI
+              </div>
 
-          <div className="hidden rounded-full border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-700 sm:block">
-            🔒 Private & respectful
-          </div>
-        </header>
-
-        <section className="mb-8 overflow-hidden rounded-[2rem] border border-indigo-100 bg-white shadow-xl">
-          <div className="grid gap-0 lg:grid-cols-[1.2fr_0.8fr]">
-            <div className="p-8 sm:p-10 lg:p-12">
-              <span className="inline-flex rounded-full bg-indigo-50 px-4 py-2 text-sm font-medium text-indigo-700">
-                Built to understand your work, not replace it
-              </span>
-
-              <h2 className="mt-5 max-w-2xl text-4xl font-black tracking-tight text-slate-950 sm:text-5xl">
-                Tell us what&apos;s slowing you down.
-              </h2>
-
-              <p className="mt-5 max-w-2xl text-lg leading-8 text-slate-600">
-                Your role matters. We are here to learn what feels repetitive,
-                frustrating, or time-consuming so we can build tools that make
-                your day lighter, faster, and more productive.
-              </p>
-
-              <div className="mt-8 grid gap-3 sm:grid-cols-3">
-                <InfoPill title="Confidential" text="Your responses stay private" />
-                <InfoPill title="Practical" text="Focus on real work problems" />
-                <InfoPill title="Helpful" text="Build better solutions together" />
+              <div>
+                <p className="text-xs uppercase tracking-widest text-indigo-400">
+                  Feedback App
+                </p>
+                <h1 className="text-3xl font-bold">AI Feedback Intelligence</h1>
               </div>
             </div>
 
-            <div className="flex items-stretch bg-gradient-to-br from-indigo-600 to-blue-700 p-8 text-white sm:p-10 lg:p-12">
-              <div className="flex w-full flex-col justify-between">
-                <div>
-                  <p className="text-sm font-semibold uppercase tracking-[0.18em] text-indigo-100">
-                    Why people respond
-                  </p>
-                  <p className="mt-4 text-2xl font-bold leading-tight">
-                    They feel understood, safe, and respected.
-                  </p>
-                </div>
+            <h2 className="mt-8 text-5xl font-extrabold leading-tight">
+              Tell us what’s slowing your team down.
+            </h2>
 
-                <div className="mt-10 rounded-2xl border border-white/15 bg-white/10 p-5 backdrop-blur">
-                  <p className="text-sm text-indigo-100">What you share helps us learn:</p>
-                  <ul className="mt-3 space-y-2 text-sm leading-6 text-white/95">
-                    <li>• Which tools create friction in daily work</li>
-                    <li>• Where time gets lost across tasks</li>
-                    <li>• Which simple tools could make life easier</li>
-                  </ul>
-                </div>
-              </div>
+            <p className="mt-5 max-w-xl text-slate-400">
+              Turn real frustrations into structured insights that drive product
+              decisions.
+            </p>
+
+            <div className="mt-6 flex flex-wrap gap-3">
+              {["Private", "AI Powered", "Actionable"].map((t) => (
+                <span
+                  key={t}
+                  className="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm"
+                >
+                  {t}
+                </span>
+              ))}
+            </div>
+          </div>
+
+          <div className="rounded-3xl bg-gradient-to-br from-indigo-600 to-blue-600 p-8 text-white shadow-2xl">
+            <p className="text-sm uppercase tracking-widest text-indigo-200">
+              Why people respond
+            </p>
+
+            <h3 className="mt-4 text-3xl font-bold">
+              They feel understood, safe, and respected.
+            </h3>
+
+            <div className="mt-8 grid grid-cols-3 gap-4">
+              <Stat label="Private" value="100%" />
+              <Stat label="Questions" value="3" />
+              <Stat label="Outcome" value="Insights" />
             </div>
           </div>
         </section>
 
-        <section className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-xl sm:p-8 lg:p-10">
-          <div className="mb-8">
-            <h3 className="text-2xl font-bold tracking-tight sm:text-3xl">
-              Share your feedback
-            </h3>
-            <p className="mt-3 max-w-3xl text-slate-600">
-              Please answer honestly. The more specific you are, the better we
-              can understand real workflow problems and design useful solutions.
-            </p>
+        <section className="mt-16 rounded-3xl border border-white/10 bg-white/5 p-10 backdrop-blur-xl">
+          <div className="flex items-center justify-between">
+            <h3 className="text-2xl font-bold">Share your feedback</h3>
+
+            <div className="text-sm text-slate-400">{formCompletion}%</div>
           </div>
 
-          <form onSubmit={handleSubmit} className="grid gap-6">
-            <div className="grid gap-5 md:grid-cols-2">
+          <form onSubmit={handleSubmit} className="mt-8 grid gap-6" noValidate>
+            <div className="grid gap-4 md:grid-cols-2">
               <Input
-                label="Name"
                 name="name"
-                placeholder="Your full name"
+                placeholder="Name"
                 value={formData.name}
                 onChange={handleChange}
+                error={fieldErrors.name}
               />
               <Input
-                label="Email"
                 name="email"
-                type="email"
-                placeholder="you@example.com"
+                placeholder="Email"
                 value={formData.email}
                 onChange={handleChange}
+                error={fieldErrors.email}
+                type="email"
               />
               <Input
-                label="Role"
                 name="role"
-                placeholder="e.g. Designer, Developer, Manager"
+                placeholder="Role"
                 value={formData.role}
                 onChange={handleChange}
+                error={fieldErrors.role}
               />
               <Input
-                label="Company"
                 name="company"
-                placeholder="Your company or organization"
+                placeholder="Company"
                 value={formData.company}
                 onChange={handleChange}
+                error={fieldErrors.company}
               />
             </div>
 
             <Textarea
-              label="What tools do you use in daily life?"
               name="tools_used"
-              placeholder="Slack, Notion, Excel, Jira, Cursor..."
+              placeholder="Tools you use..."
               value={formData.tools_used}
               onChange={handleChange}
+              error={fieldErrors.tools_used}
             />
-
             <Textarea
-              label="What pain points do you face in day-to-day life?"
               name="pain_points"
-              placeholder="What slows you down, feels repetitive, or causes frustration?"
+              placeholder="Pain points..."
               value={formData.pain_points}
               onChange={handleChange}
+              error={fieldErrors.pain_points}
             />
-
             <Textarea
-              label="What new tool would solve your problems?"
               name="new_tool"
-              placeholder="Describe the ideal tool or feature that would help you most"
+              placeholder="Ideal solution..."
               value={formData.new_tool}
               onChange={handleChange}
+              error={fieldErrors.new_tool}
             />
 
-            {error && (
-              <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                {error}
+            {submitError ? (
+              <div className="rounded-2xl border border-red-400/30 bg-red-500/10 px-4 py-3 text-sm text-red-100">
+                {submitError}
               </div>
-            )}
+            ) : null}
+
+            {retryCount > 0 ? (
+              <div className="rounded-2xl border border-amber-400/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+                The first attempt failed, retrying automatically.
+              </div>
+            ) : null}
 
             <button
               type="submit"
               disabled={loading}
-              className="inline-flex items-center justify-center rounded-2xl bg-indigo-600 px-6 py-4 text-base font-semibold text-white shadow-lg shadow-indigo-600/20 transition hover:-translate-y-0.5 hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-70"
+              className="mt-4 rounded-2xl bg-gradient-to-r from-indigo-500 to-blue-500 py-4 text-lg font-semibold transition hover:scale-[1.02] disabled:cursor-not-allowed disabled:opacity-70"
             >
-              {loading ? "Submitting..." : "Share my feedback"}
+              {loading ? "Submitting..." : "Share Feedback"}
             </button>
-
-            <p className="text-center text-sm text-slate-500">
-              We respect your perspective and aim to improve work, not replace
-              the people doing it.
-            </p>
           </form>
         </section>
       </div>
@@ -260,71 +312,80 @@ export default function Home() {
   );
 }
 
-function Input({
-  label,
-  name,
-  value,
-  onChange,
-  placeholder,
-  type = "text",
-}: {
-  label: string;
-  name: string;
+type InputProps = {
+  name: keyof FeedbackFormData;
+  placeholder: string;
   value: string;
-  onChange: ChangeEventHandler<HTMLInputElement>;
-  placeholder?: string;
+  onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  error?: string;
   type?: string;
-}) {
+};
+
+function Input({ name, placeholder, value, onChange, error, type = "text" }: InputProps) {
   return (
     <label className="grid gap-2">
-      <span className="text-sm font-semibold text-slate-700">{label}</span>
+      <span className="text-sm text-slate-300">{fieldLabels[name]}</span>
       <input
         name={name}
         type={type}
         value={value}
         onChange={onChange}
         placeholder={placeholder}
-        className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-indigo-500 focus:bg-white focus:ring-4 focus:ring-indigo-100"
+        aria-invalid={Boolean(error)}
+        aria-describedby={error ? `${name}-error` : undefined}
+        className={`rounded-xl border bg-white/5 p-3 outline-none focus:ring-2 focus:ring-indigo-500 ${
+          error ? "border-red-400/70" : "border-white/10"
+        }`}
         required
       />
+      {error ? (
+        <span id={`${name}-error`} className="text-sm text-red-300">
+          {error}
+        </span>
+      ) : null}
     </label>
   );
 }
 
-function Textarea({
-  label,
-  name,
-  value,
-  onChange,
-  placeholder,
-}: {
-  label: string;
-  name: string;
+type TextareaProps = {
+  name: keyof FeedbackFormData;
+  placeholder: string;
   value: string;
-  onChange: ChangeEventHandler<HTMLTextAreaElement>;
-  placeholder?: string;
-}) {
+  onChange: (e: React.ChangeEvent<HTMLTextAreaElement>) => void;
+  error?: string;
+};
+
+function Textarea({ name, placeholder, value, onChange, error }: TextareaProps) {
   return (
     <label className="grid gap-2">
-      <span className="text-sm font-semibold text-slate-700">{label}</span>
+      <span className="text-sm text-slate-300">{fieldLabels[name]}</span>
       <textarea
         name={name}
         value={value}
         onChange={onChange}
         placeholder={placeholder}
-        rows={5}
-        className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-indigo-500 focus:bg-white focus:ring-4 focus:ring-indigo-100"
+        rows={4}
+        aria-invalid={Boolean(error)}
+        aria-describedby={error ? `${name}-error` : undefined}
+        className={`rounded-xl border bg-white/5 p-3 outline-none focus:ring-2 focus:ring-indigo-500 ${
+          error ? "border-red-400/70" : "border-white/10"
+        }`}
         required
       />
+      {error ? (
+        <span id={`${name}-error`} className="text-sm text-red-300">
+          {error}
+        </span>
+      ) : null}
     </label>
   );
 }
 
-function InfoPill({ title, text }: { title: string; text: string }) {
+function Stat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-      <p className="text-sm font-bold text-slate-900">{title}</p>
-      <p className="mt-1 text-sm leading-6 text-slate-600">{text}</p>
+    <div className="rounded-xl bg-white/10 p-4 text-center">
+      <p className="text-sm text-indigo-200">{label}</p>
+      <p className="text-xl font-bold">{value}</p>
     </div>
   );
 }
