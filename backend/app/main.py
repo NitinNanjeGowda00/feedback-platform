@@ -8,7 +8,7 @@ from io import StringIO
 from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from sqlalchemy import func, text
+from sqlalchemy import Date, cast, func, inspect, text
 from sqlalchemy.orm import Session, joinedload
 
 from .database import Base, IS_SQLITE, SessionLocal, engine
@@ -157,9 +157,8 @@ def ensure_phase1_tables() -> None:
 
 
 def migrate_legacy_feedback(db: Session) -> None:
-    with engine.connect() as conn:
-        legacy_exists = engine.dialect.has_table(conn, "feedback")
-    if not legacy_exists:
+    inspector = inspect(engine)
+    if "feedback" not in inspector.get_table_names():
         return
 
     already_migrated = db.query(FeedbackSubmission).first()
@@ -524,17 +523,15 @@ def analytics_summary(db: Session = Depends(get_db)):
 
     seven_days_ago = datetime.utcnow() - timedelta(days=7)
 
-    day_bucket = func.date(VisitorEvent.created_at)
-
     daily_rows = (
         db.query(
-            day_bucket.label("day"),
+            cast(VisitorEvent.created_at, Date).label("day"),
             func.count(VisitorEvent.id),
         )
         .filter(VisitorEvent.created_at.isnot(None))
         .filter(VisitorEvent.created_at >= seven_days_ago)
-        .group_by(day_bucket)
-        .order_by(day_bucket)
+        .group_by(cast(VisitorEvent.created_at, Date))
+        .order_by(cast(VisitorEvent.created_at, Date))
         .all()
     )
 

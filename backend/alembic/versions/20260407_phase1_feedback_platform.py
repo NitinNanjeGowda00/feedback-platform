@@ -90,14 +90,21 @@ def upgrade() -> None:
     op.create_index("ix_feedback_analysis_category", "feedback_analysis", ["category"], unique=False)
     op.create_index("ix_feedback_analysis_processing_status", "feedback_analysis", ["processing_status"], unique=False)
     op.create_index("ix_feedback_analysis_sentiment_label", "feedback_analysis", ["sentiment_label"], unique=False)
+    op.create_index("ix_feedback_analysis_submission_id", "feedback_analysis", ["submission_id"], unique=False)
+    op.create_index("ix_feedback_submissions_organization_id", "feedback_submissions", ["organization_id"], unique=False)
+    op.create_index("ix_feedback_submissions_respondent_id", "feedback_submissions", ["respondent_id"], unique=False)
+    op.create_index("ix_respondents_organization_id", "respondents", ["organization_id"], unique=False)
 
 
 def downgrade() -> None:
+    op.drop_index("ix_feedback_analysis_submission_id", table_name="feedback_analysis")
     op.drop_index("ix_feedback_analysis_sentiment_label", table_name="feedback_analysis")
     op.drop_index("ix_feedback_analysis_processing_status", table_name="feedback_analysis")
     op.drop_index("ix_feedback_analysis_category", table_name="feedback_analysis")
     op.drop_table("feedback_analysis")
 
+    op.drop_index("ix_feedback_submissions_respondent_id", table_name="feedback_submissions")
+    op.drop_index("ix_feedback_submissions_organization_id", table_name="feedback_submissions")
     op.drop_index("ix_feedback_submissions_is_anonymous", table_name="feedback_submissions")
     op.drop_index("ix_feedback_submissions_language", table_name="feedback_submissions")
     op.drop_index("ix_feedback_submissions_source_channel", table_name="feedback_submissions")
@@ -106,6 +113,7 @@ def downgrade() -> None:
     op.drop_index("ix_feedback_submissions_submission_id", table_name="feedback_submissions")
     op.drop_table("feedback_submissions")
 
+    op.drop_index("ix_respondents_organization_id", table_name="respondents")
     op.drop_index("ix_respondents_role", table_name="respondents")
     op.drop_index("ix_respondents_company", table_name="respondents")
     op.drop_index("ix_respondents_email", table_name="respondents")

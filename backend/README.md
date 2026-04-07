@@ -28,6 +28,8 @@ Run schema migrations with:
 alembic upgrade head
 ```
 
+Do not rely on startup schema creation in PostgreSQL mode. PostgreSQL runtime expects Alembic-managed schema.
+
 ### Local legacy SQLite mode
 
 SQLite is still supported only as a compatibility path for older local data.
