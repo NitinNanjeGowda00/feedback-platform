@@ -13,12 +13,9 @@ type FeedbackFormData = {
   new_tool: string;
 };
 
-type FeedbackResponse = FeedbackFormData & {
+type FeedbackResponse = {
   id: number;
-  category?: string | null;
-  sentiment_label?: string | null;
-  sentiment_score?: number | null;
-  summary?: string | null;
+  submission_id: string;
   created_at: string;
 };
 
@@ -156,7 +153,7 @@ export default function Home() {
     try {
       const result = await submitFeedback();
       setLastSubmittedSignature(submissionSignature);
-      router.push(`/thank-you?submissionId=${result.id}`);
+      router.push(`/thank-you?submissionId=${result.submission_id}`);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to submit feedback.";
       setSubmitError(message);

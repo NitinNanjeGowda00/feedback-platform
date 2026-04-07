@@ -48,16 +48,21 @@ class FeedbackVectorStore:
             self.tokenizer = None
             self.model = None
 
-    def _clean_text(self, feedback) -> str:
+    def _clean_text(self, submission) -> str:
+        respondent = getattr(submission, "respondent", None)
+        latest_analysis = getattr(submission, "latest_analysis", None)
         parts = [
-            feedback.name,
-            feedback.role,
-            feedback.company,
-            feedback.tools_used,
-            feedback.pain_points,
-            feedback.new_tool,
-            feedback.category or "",
-            feedback.summary or "",
+            getattr(respondent, "name", None),
+            getattr(respondent, "role", None),
+            getattr(respondent, "company", None),
+            submission.tools_used,
+            submission.pain_points,
+            submission.new_tool,
+            getattr(latest_analysis, "category", None) or "",
+            getattr(latest_analysis, "summary", None) or "",
+            submission.status,
+            submission.priority,
+            submission.tags or "",
         ]
         return " ".join([p for p in parts if p]).strip()
 
@@ -101,24 +106,27 @@ class FeedbackVectorStore:
         except Exception:
             return self._fallback_embed(texts)
 
-    def rebuild(self, feedback_rows) -> None:
+    def rebuild(self, submissions) -> None:
         self.items = []
         texts = []
 
-        for row in feedback_rows:
-            texts.append(self._clean_text(row))
+        for submission in submissions:
+            latest_analysis = getattr(submission, "latest_analysis", None)
+            respondent = getattr(submission, "respondent", None)
+            texts.append(self._clean_text(submission))
             self.items.append(
                 {
-                    "id": row.id,
-                    "category": row.category,
-                    "summary": row.summary,
-                    "created_at": row.created_at,
-                    "tools_used": row.tools_used,
-                    "pain_points": row.pain_points,
-                    "new_tool": row.new_tool,
-                    "name": row.name,
-                    "role": row.role,
-                    "company": row.company,
+                    "id": submission.id,
+                    "submission_id": submission.submission_id,
+                    "category": getattr(latest_analysis, "category", None),
+                    "summary": getattr(latest_analysis, "summary", None),
+                    "created_at": submission.created_at,
+                    "tools_used": submission.tools_used,
+                    "pain_points": submission.pain_points,
+                    "new_tool": submission.new_tool,
+                    "name": getattr(respondent, "name", None),
+                    "role": getattr(respondent, "role", None),
+                    "company": getattr(respondent, "company", None),
                 }
             )
 
@@ -134,20 +142,23 @@ class FeedbackVectorStore:
         else:
             self.index = None
 
-    def add_feedback(self, feedback) -> None:
+    def add_feedback(self, submission) -> None:
+        latest_analysis = getattr(submission, "latest_analysis", None)
+        respondent = getattr(submission, "respondent", None)
         item = {
-            "id": feedback.id,
-            "category": feedback.category,
-            "summary": feedback.summary,
-            "created_at": feedback.created_at,
-            "tools_used": feedback.tools_used,
-            "pain_points": feedback.pain_points,
-            "new_tool": feedback.new_tool,
-            "name": feedback.name,
-            "role": feedback.role,
-            "company": feedback.company,
+            "id": submission.id,
+            "submission_id": submission.submission_id,
+            "category": getattr(latest_analysis, "category", None),
+            "summary": getattr(latest_analysis, "summary", None),
+            "created_at": submission.created_at,
+            "tools_used": submission.tools_used,
+            "pain_points": submission.pain_points,
+            "new_tool": submission.new_tool,
+            "name": getattr(respondent, "name", None),
+            "role": getattr(respondent, "role", None),
+            "company": getattr(respondent, "company", None),
         }
-        vector = self.embed([self._clean_text(feedback)])
+        vector = self.embed([self._clean_text(submission)])
 
         if self.index is not None and faiss is not None and len(self.items) > 0:
             self.index.add(vector)
@@ -185,6 +196,7 @@ class FeedbackVectorStore:
             results.append(
                 {
                     "id": item["id"],
+                    "submission_id": item.get("submission_id"),
                     "score": round(score, 4),
                     "category": item["category"],
                     "summary": item["summary"],

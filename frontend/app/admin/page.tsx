@@ -4,18 +4,42 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 
 type FeedbackEntry = {
     id: number;
-    name: string;
-    email: string;
-    role: string;
-    company: string;
+    submission_id: string;
+    status: string;
+    priority: string;
+    tags?: string | null;
+    owner?: string | null;
+    source_channel: string;
+    language: string;
+    consent_to_store: boolean;
+    is_anonymous: boolean;
     tools_used: string;
     pain_points: string;
     new_tool: string;
-    category?: string | null;
-    sentiment_label?: string | null;
-    sentiment_score?: number | null;
-    summary?: string | null;
     created_at: string;
+    updated_at: string;
+    archived_at?: string | null;
+    respondent?: {
+        id: number;
+        name: string;
+        email: string;
+        role: string;
+        company: string;
+        preferred_language: string;
+    } | null;
+    latest_analysis?: {
+        id: number;
+        model_version: string;
+        category?: string | null;
+        confidence_score?: number | null;
+        sentiment_label?: string | null;
+        sentiment_score?: number | null;
+        summary?: string | null;
+        processing_status: string;
+        needs_human_review: boolean;
+        created_at: string;
+        updated_at: string;
+    } | null;
 };
 
 type SortMode = "newest" | "oldest";
@@ -43,6 +67,7 @@ type SearchResponse = {
     answer: string;
     matches: Array<{
         id: number;
+        submission_id?: string | null;
         score: number;
         category?: string | null;
         summary?: string | null;
@@ -220,17 +245,25 @@ export default function AdminPage() {
         const filtered = data.filter((item) => {
             if (!q) return true;
 
+            const respondent = item.respondent;
+            const analysis = item.latest_analysis;
+
             return (
-                item.name.toLowerCase().includes(q) ||
-                item.email.toLowerCase().includes(q) ||
-                item.role.toLowerCase().includes(q) ||
-                item.company.toLowerCase().includes(q) ||
-                (item.category || "").toLowerCase().includes(q) ||
-                (item.sentiment_label || "").toLowerCase().includes(q) ||
+                (respondent?.name || "").toLowerCase().includes(q) ||
+                (respondent?.email || "").toLowerCase().includes(q) ||
+                (respondent?.role || "").toLowerCase().includes(q) ||
+                (respondent?.company || "").toLowerCase().includes(q) ||
+                item.submission_id.toLowerCase().includes(q) ||
+                item.status.toLowerCase().includes(q) ||
+                item.priority.toLowerCase().includes(q) ||
+                item.source_channel.toLowerCase().includes(q) ||
+                item.language.toLowerCase().includes(q) ||
+                (analysis?.category || "").toLowerCase().includes(q) ||
+                (analysis?.sentiment_label || "").toLowerCase().includes(q) ||
                 item.tools_used.toLowerCase().includes(q) ||
                 item.pain_points.toLowerCase().includes(q) ||
                 item.new_tool.toLowerCase().includes(q) ||
-                (item.summary || "").toLowerCase().includes(q)
+                (analysis?.summary || "").toLowerCase().includes(q)
             );
         });
 
@@ -244,9 +277,11 @@ export default function AdminPage() {
     const stats = useMemo(() => {
         const total = data.length;
         const companies = new Set(
-            data.map((item) => item.company.trim()).filter(Boolean)
+            data.map((item) => item.respondent?.company?.trim() || "").filter(Boolean)
         ).size;
-        const roles = new Set(data.map((item) => item.role.trim()).filter(Boolean)).size;
+        const roles = new Set(
+            data.map((item) => item.respondent?.role?.trim() || "").filter(Boolean)
+        ).size;
         const latest =
             data.length > 0
                 ? new Date(
@@ -462,6 +497,9 @@ export default function AdminPage() {
                                                 <span className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700">
                                                     {match.category || "Other"}
                                                 </span>
+                                                {match.submission_id ? (
+                                                    <span className="text-xs text-slate-500">#{match.submission_id}</span>
+                                                ) : null}
                                                 <span className="text-xs text-slate-500">score {match.score}</span>
                                             </div>
                                             <p className="mt-2 text-sm leading-6 text-slate-700">{match.snippet}</p>
@@ -519,11 +557,11 @@ export default function AdminPage() {
                                 <thead className="sticky top-0 bg-slate-50">
                                     <tr>
                                         {[
-                                            "Name",
-                                            "Email",
-                                            "Role",
-                                            "Company",
+                                            "Submission",
+                                            "Respondent",
+                                            "Company / Role",
                                             "Category",
+                                            "Status",
                                             "Sentiment",
                                             "Tools",
                                             "Pain Points",
@@ -546,23 +584,34 @@ export default function AdminPage() {
                                             key={item.id}
                                             className="align-top transition hover:bg-slate-50/80"
                                         >
-                                            <td className="border-b border-slate-100 px-4 py-4 font-medium">
-                                                {item.name}
+                                            <td className="border-b border-slate-100 px-4 py-4 text-sm text-slate-700">
+                                                <div className="font-medium">#{item.submission_id}</div>
+                                                <div className="mt-1 text-xs text-slate-500">{item.source_channel} · {item.language}</div>
                                             </td>
                                             <td className="border-b border-slate-100 px-4 py-4 text-slate-600">
-                                                {item.email}
+                                                <div className="font-medium text-slate-900">{item.respondent?.name || "Anonymous"}</div>
+                                                <div className="text-sm">{item.respondent?.email || "Hidden"}</div>
                                             </td>
                                             <td className="border-b border-slate-100 px-4 py-4 text-slate-600">
-                                                {item.role}
+                                                <div>{item.respondent?.company || "—"}</div>
+                                                <div className="text-sm text-slate-500">{item.respondent?.role || "—"}</div>
                                             </td>
                                             <td className="border-b border-slate-100 px-4 py-4 text-slate-600">
-                                                {item.company}
+                                                <Pill text={item.latest_analysis?.category || "Other"} />
                                             </td>
                                             <td className="border-b border-slate-100 px-4 py-4 text-slate-600">
-                                                <Pill text={item.category || "Other"} />
+                                                <div className="flex flex-col gap-2">
+                                                    <Pill text={item.status} />
+                                                    <Pill text={item.priority} tone="slate" />
+                                                </div>
                                             </td>
                                             <td className="border-b border-slate-100 px-4 py-4 text-slate-600">
-                                                <Pill text={item.sentiment_label || "neutral"} />
+                                                <div className="flex flex-col gap-2">
+                                                    <Pill text={item.latest_analysis?.sentiment_label || "neutral"} />
+                                                    {item.latest_analysis?.needs_human_review ? (
+                                                        <Pill text="Needs review" tone="amber" />
+                                                    ) : null}
+                                                </div>
                                             </td>
                                             <td className="border-b border-slate-100 px-4 py-4 text-slate-600">
                                                 <CellText text={item.tools_used} />
@@ -609,36 +658,19 @@ function StatCard({
     );
 }
 
-function SortButton({
-    active,
-    onClick,
-    label,
-}: {
-    active: boolean;
-    onClick: () => void;
-    label: string;
-}) {
-    return (
-        <button
-            type="button"
-            onClick={onClick}
-            className={`rounded-2xl px-4 py-3 font-semibold transition ${active
-                ? "bg-indigo-600 text-white shadow-lg shadow-indigo-600/20"
-                : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-                }`}
-        >
-            {label}
-        </button>
-    );
-}
-
 function CellText({ text }: { text: string }) {
     return <div className="max-w-[280px] whitespace-pre-wrap leading-6">{text}</div>;
 }
 
-function Pill({ text }: { text: string }) {
+function Pill({ text, tone = "indigo" }: { text: string; tone?: "indigo" | "slate" | "amber" }) {
+    const toneClass = {
+        indigo: "bg-indigo-50 text-indigo-700",
+        slate: "bg-slate-100 text-slate-700",
+        amber: "bg-amber-100 text-amber-800",
+    }[tone];
+
     return (
-        <span className="inline-flex rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700">
+        <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${toneClass}`}>
             {text}
         </span>
     );

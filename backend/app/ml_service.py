@@ -68,9 +68,11 @@ class IntelligenceEngine:
 
         self.model_path = self.artifacts_dir / "category_model.joblib"
         self.generator_model = os.getenv("HF_TEXT2TEXT_MODEL", "google/flan-t5-small")
+        self.enable_generator = os.getenv("ENABLE_HF_GENERATOR", "1") == "1"
+        self.model_version = os.getenv("AI_MODEL_VERSION", "rules-v1")
 
         self.classifier = self._load_or_train_classifier()
-        self.generator = self._load_generator()
+        self.generator = self._load_generator() if self.enable_generator else None
 
     def _training_samples(self) -> tuple[list[str], list[str]]:
         samples = {
@@ -156,6 +158,7 @@ class IntelligenceEngine:
     def _load_generator(self):
         if hf_pipeline is None:
             return None
+
         try:
             return hf_pipeline(
                 "text2text-generation",
@@ -175,7 +178,7 @@ class IntelligenceEngine:
         return None
 
     def classify(self, text: str) -> tuple[str, float]:
-        cleaned = " ".join(text.split())
+        cleaned = " ".join((text or "").split())
         if not cleaned:
             return "Other", 0.0
 
@@ -183,18 +186,19 @@ class IntelligenceEngine:
         if rule:
             return rule, 0.95
 
-        probs = self.classifier.predict_proba([cleaned])[0]
-        idx = int(np.argmax(probs))
-        label = str(self.classifier.classes_[idx])
-        score = float(probs[idx])
-
-        if score < 0.35:
-            return "Other", score
-
-        return label, score
+        try:
+            probs = self.classifier.predict_proba([cleaned])[0]
+            idx = int(np.argmax(probs))
+            label = str(self.classifier.classes_[idx])
+            score = float(probs[idx])
+            if score < 0.35:
+                return "Other", score
+            return label, score
+        except Exception:
+            return "Other", 0.0
 
     def sentiment(self, text: str) -> tuple[str, float]:
-        tokens = re.findall(r"[a-zA-Z']+", text.lower())
+        tokens = re.findall(r"[a-zA-Z']+", (text or "").lower())
         if not tokens:
             return "neutral", 0.0
 
@@ -217,6 +221,7 @@ class IntelligenceEngine:
                 prompt,
                 max_new_tokens=max_new_tokens,
                 do_sample=False,
+                truncation=True,
             )
             if result and isinstance(result, list):
                 text = result[0].get("generated_text", "").strip()
@@ -226,8 +231,12 @@ class IntelligenceEngine:
 
         return None
 
+    def _normalize_feedback_text(self, *parts: str | None) -> str:
+        joined = " ".join(part.strip() for part in parts if part and part.strip())
+        return re.sub(r"\s+", " ", joined).strip()
+
     def summarize_feedback(self, feedback_text: str) -> str:
-        feedback_text = " ".join(feedback_text.split())
+        feedback_text = self._normalize_feedback_text(feedback_text)
         if not feedback_text:
             return "No feedback supplied."
 
@@ -236,13 +245,17 @@ class IntelligenceEngine:
             "{text}\n"
             "Summary:"
         )
-        prompt = PromptTemplate.from_template(template).format(text=feedback_text) if PromptTemplate else template.format(text=feedback_text)
+        prompt = (
+            PromptTemplate.from_template(template).format(text=feedback_text)
+            if PromptTemplate
+            else template.format(text=feedback_text)
+        )
         generated = self._generate(prompt, max_new_tokens=80)
         if generated:
             return generated
 
         sentences = re.split(r"(?<=[.!?])\s+", feedback_text)
-        return sentences[0][:220] if sentences else feedback_text[:220]
+        return (sentences[0] if sentences else feedback_text)[:220]
 
     def build_insights(self, feedback_rows) -> dict[str, Any]:
         if not feedback_rows:
@@ -256,14 +269,18 @@ class IntelligenceEngine:
                 "sample_highlights": [],
             }
 
-        categories = Counter((row.category or "Other").strip() or "Other" for row in feedback_rows)
+        categories = Counter(
+            (getattr(getattr(row, "latest_analysis", None), "category", None) or "Other").strip() or "Other"
+            for row in feedback_rows
+        )
         top_categories = [{"label": label, "count": count} for label, count in categories.most_common()]
         samples = feedback_rows[:8]
 
         combined_text = "\n".join(
-            f"- {row.role} at {row.company}: {row.pain_points[:220]}"
+            f"- {getattr(getattr(row, 'respondent', None), 'role', '')} at {getattr(getattr(row, 'respondent', None), 'company', '')}: "
+            f"{self._normalize_feedback_text(getattr(row, 'pain_points', None), getattr(row, 'new_tool', None))[:220]}"
             for row in samples
-        )
+        ).strip()
 
         prompt_template = (
             "You are an AI product analyst. Based on the following feedback themes and examples, "
@@ -272,15 +289,16 @@ class IntelligenceEngine:
             "Feedback examples:\n{examples}\n\n"
             "Return a concise executive summary."
         )
+
         prompt = (
             PromptTemplate.from_template(prompt_template).format(
                 theme_counts="\n".join(f"{c['label']}: {c['count']}" for c in top_categories),
-                examples=combined_text,
+                examples=combined_text or "No examples available.",
             )
             if PromptTemplate
             else prompt_template.format(
                 theme_counts="\n".join(f"{c['label']}: {c['count']}" for c in top_categories),
-                examples=combined_text,
+                examples=combined_text or "No examples available.",
             )
         )
 
@@ -289,9 +307,17 @@ class IntelligenceEngine:
 
         recommendations = self._recommendations_from_categories(top_categories)
         sample_highlights = [
-            (row.summary or row.pain_points or row.new_tool or "")[:220].strip()
+            self._normalize_feedback_text(
+                getattr(getattr(row, "latest_analysis", None), "summary", None),
+                getattr(row, "pain_points", None),
+                getattr(row, "new_tool", None),
+            )[:220]
             for row in samples[:5]
-            if (row.summary or row.pain_points or row.new_tool)
+            if self._normalize_feedback_text(
+                getattr(getattr(row, "latest_analysis", None), "summary", None),
+                getattr(row, "pain_points", None),
+                getattr(row, "new_tool", None),
+            )
         ]
 
         return {
@@ -337,6 +363,7 @@ class IntelligenceEngine:
         context = "\n".join(
             f"- [{m.get('category') or 'Other'}] {m.get('snippet')}"
             for m in matches[:5]
+            if m.get("snippet")
         )
 
         template = (
@@ -346,9 +373,9 @@ class IntelligenceEngine:
             "Write a short answer with clear business language."
         )
         prompt = (
-            PromptTemplate.from_template(template).format(query=query, context=context)
+            PromptTemplate.from_template(template).format(query=query, context=context or "No context available.")
             if PromptTemplate
-            else template.format(query=query, context=context)
+            else template.format(query=query, context=context or "No context available.")
         )
 
         generated = self._generate(prompt, max_new_tokens=160)
@@ -361,18 +388,37 @@ class IntelligenceEngine:
             f"Most matching responses mention: {top.get('snippet')}"
         )
 
-    def log_mlflow(self, feedback_row, category: str, confidence: float, sentiment_label: str, sentiment_score: float) -> None:
+    def log_mlflow(
+        self,
+        submission,
+        category: str,
+        confidence: float,
+        sentiment_label: str,
+        sentiment_score: float,
+    ) -> None:
         if mlflow is None or not os.getenv("MLFLOW_TRACKING_URI"):
             return
 
         try:
+            mlflow.set_tracking_uri(os.getenv("MLFLOW_TRACKING_URI"))
             mlflow.set_experiment(os.getenv("MLFLOW_EXPERIMENT_NAME", "feedback-intelligence"))
-            with mlflow.start_run(run_name=f"feedback-{feedback_row.id}"):
+            with mlflow.start_run(run_name=f"feedback-{submission.id}"):
+                mlflow.log_param("submission_id", getattr(submission, "submission_id", submission.id))
                 mlflow.log_param("category", category)
                 mlflow.log_param("sentiment_label", sentiment_label)
+                mlflow.log_param("model_version", self.model_version)
                 mlflow.log_metric("confidence", confidence)
                 mlflow.log_metric("sentiment_score", sentiment_score)
-                mlflow.log_metric("text_length", len((feedback_row.pain_points or "") + (feedback_row.new_tool or "")))
-                mlflow.log_text(feedback_row.pain_points or "", "pain_points.txt")
+                mlflow.log_metric(
+                    "text_length",
+                    len(
+                        self._normalize_feedback_text(
+                            getattr(submission, "tools_used", None),
+                            getattr(submission, "pain_points", None),
+                            getattr(submission, "new_tool", None),
+                        )
+                    ),
+                )
+                mlflow.log_text(getattr(submission, "pain_points", "") or "", "pain_points.txt")
         except Exception:
             pass
