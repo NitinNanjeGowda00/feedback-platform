@@ -11,7 +11,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import func, text
 from sqlalchemy.orm import Session, joinedload
 
-from .database import Base, SessionLocal, engine
+from .database import Base, IS_SQLITE, SessionLocal, engine
 from .ml_service import IntelligenceEngine
 from .models import FeedbackAnalysis, FeedbackSubmission, Organization, Respondent, VisitorEvent
 from .schemas import (
@@ -69,6 +69,9 @@ def get_db():
 
 
 def ensure_phase1_tables() -> None:
+    if not IS_SQLITE:
+        return
+
     statements = [
         """
         CREATE TABLE IF NOT EXISTS organizations (
@@ -282,11 +285,14 @@ def refresh_vector_store(db: Session) -> None:
 
 @app.on_event("startup")
 def on_startup():
-    Base.metadata.create_all(bind=engine)
-    ensure_phase1_tables()
+    if IS_SQLITE:
+        Base.metadata.create_all(bind=engine)
+        ensure_phase1_tables()
+
     db = SessionLocal()
     try:
-        migrate_legacy_feedback(db)
+        if IS_SQLITE:
+            migrate_legacy_feedback(db)
         refresh_vector_store(db)
     finally:
         db.close()
@@ -518,15 +524,17 @@ def analytics_summary(db: Session = Depends(get_db)):
 
     seven_days_ago = datetime.utcnow() - timedelta(days=7)
 
+    day_bucket = func.date(VisitorEvent.created_at)
+
     daily_rows = (
         db.query(
-            func.strftime("%Y-%m-%d", VisitorEvent.created_at).label("day"),
+            day_bucket.label("day"),
             func.count(VisitorEvent.id),
         )
         .filter(VisitorEvent.created_at.isnot(None))
         .filter(VisitorEvent.created_at >= seven_days_ago)
-        .group_by("day")
-        .order_by("day")
+        .group_by(day_bucket)
+        .order_by(day_bucket)
         .all()
     )
 
