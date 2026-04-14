@@ -1,16 +1,24 @@
 from __future__ import annotations
 
+
+from dotenv import load_dotenv
+load_dotenv()
+
 import csv
 import os
 from datetime import datetime, timedelta
 from io import StringIO
+from app.database import Base, engine
 
+
+from fastapi import BackgroundTasks
 from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from sqlalchemy import Date, cast, func, inspect, text
 from sqlalchemy.orm import Session, joinedload
 
+from .llm_service import LLMService
 from .database import Base, IS_SQLITE, SessionLocal, engine
 from .ml_service import IntelligenceEngine
 from .models import FeedbackAnalysis, FeedbackSubmission, Organization, Respondent, VisitorEvent
@@ -58,6 +66,7 @@ app.add_middleware(
 
 intelligence = IntelligenceEngine()
 vector_store = FeedbackVectorStore()
+llm_service = LLMService()
 
 
 def get_db():
@@ -66,175 +75,6 @@ def get_db():
         yield db
     finally:
         db.close()
-
-
-def ensure_phase1_tables() -> None:
-    if not IS_SQLITE:
-        return
-
-    statements = [
-        """
-        CREATE TABLE IF NOT EXISTS organizations (
-            id INTEGER PRIMARY KEY,
-            name VARCHAR(150) NOT NULL,
-            slug VARCHAR(150) NOT NULL UNIQUE,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
-            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL
-        )
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS respondents (
-            id INTEGER PRIMARY KEY,
-            organization_id INTEGER NULL,
-            name VARCHAR(100) NOT NULL,
-            email VARCHAR(150) NOT NULL,
-            role VARCHAR(100) NOT NULL,
-            company VARCHAR(150) NOT NULL,
-            preferred_language VARCHAR(20) DEFAULT 'en' NOT NULL,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
-            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
-            archived_at DATETIME NULL,
-            FOREIGN KEY(organization_id) REFERENCES organizations(id)
-        )
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS feedback_submissions (
-            id INTEGER PRIMARY KEY,
-            submission_id VARCHAR(36) NOT NULL UNIQUE,
-            respondent_id INTEGER NULL,
-            organization_id INTEGER NULL,
-            tools_used TEXT NOT NULL,
-            pain_points TEXT NOT NULL,
-            new_tool TEXT NOT NULL,
-            status VARCHAR(30) DEFAULT 'received' NOT NULL,
-            priority VARCHAR(20) DEFAULT 'normal' NOT NULL,
-            tags TEXT NULL,
-            owner VARCHAR(150) NULL,
-            source_channel VARCHAR(50) DEFAULT 'web' NOT NULL,
-            language VARCHAR(20) DEFAULT 'en' NOT NULL,
-            consent_to_store BOOLEAN DEFAULT 1 NOT NULL,
-            is_anonymous BOOLEAN DEFAULT 0 NOT NULL,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
-            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
-            archived_at DATETIME NULL,
-            FOREIGN KEY(respondent_id) REFERENCES respondents(id),
-            FOREIGN KEY(organization_id) REFERENCES organizations(id)
-        )
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS feedback_analysis (
-            id INTEGER PRIMARY KEY,
-            submission_id INTEGER NOT NULL,
-            model_version VARCHAR(100) DEFAULT 'rules-v1' NOT NULL,
-            category VARCHAR(50) NULL,
-            confidence_score FLOAT NULL,
-            sentiment_label VARCHAR(20) NULL,
-            sentiment_score FLOAT NULL,
-            summary TEXT NULL,
-            processing_status VARCHAR(30) DEFAULT 'completed' NOT NULL,
-            needs_human_review BOOLEAN DEFAULT 0 NOT NULL,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
-            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
-            FOREIGN KEY(submission_id) REFERENCES feedback_submissions(id)
-        )
-        """,
-        "CREATE INDEX IF NOT EXISTS ix_feedback_submissions_status ON feedback_submissions(status)",
-        "CREATE INDEX IF NOT EXISTS ix_feedback_submissions_priority ON feedback_submissions(priority)",
-        "CREATE INDEX IF NOT EXISTS ix_feedback_submissions_source_channel ON feedback_submissions(source_channel)",
-        "CREATE INDEX IF NOT EXISTS ix_feedback_submissions_language ON feedback_submissions(language)",
-        "CREATE INDEX IF NOT EXISTS ix_feedback_submissions_is_anonymous ON feedback_submissions(is_anonymous)",
-        "CREATE INDEX IF NOT EXISTS ix_feedback_analysis_category ON feedback_analysis(category)",
-        "CREATE INDEX IF NOT EXISTS ix_feedback_analysis_processing_status ON feedback_analysis(processing_status)",
-        "CREATE INDEX IF NOT EXISTS ix_feedback_analysis_sentiment_label ON feedback_analysis(sentiment_label)",
-        "CREATE INDEX IF NOT EXISTS ix_respondents_email ON respondents(email)",
-        "CREATE INDEX IF NOT EXISTS ix_respondents_company ON respondents(company)",
-        "CREATE INDEX IF NOT EXISTS ix_respondents_role ON respondents(role)",
-    ]
-
-    with engine.begin() as conn:
-        for stmt in statements:
-            conn.execute(text(stmt))
-
-
-def migrate_legacy_feedback(db: Session) -> None:
-    inspector = inspect(engine)
-    if "feedback" not in inspector.get_table_names():
-        return
-
-    already_migrated = db.query(FeedbackSubmission).first()
-    if already_migrated:
-        return
-
-    rows = db.execute(
-        text(
-            """
-            SELECT id, name, email, role, company, tools_used, pain_points, new_tool,
-                   category, sentiment_label, sentiment_score, summary, created_at
-            FROM feedback
-            ORDER BY created_at ASC, id ASC
-            """
-        )
-    ).mappings().all()
-
-    org_cache: dict[str, Organization] = {}
-
-    for row in rows:
-        company = (row["company"] or "Independent").strip() or "Independent"
-        org = org_cache.get(company.lower())
-        if org is None:
-            slug = company.lower().replace(" ", "-")
-            org = db.query(Organization).filter(Organization.slug == slug).first()
-            if org is None:
-                org = Organization(name=company, slug=slug)
-                db.add(org)
-                db.flush()
-            org_cache[company.lower()] = org
-
-        respondent = Respondent(
-            organization_id=org.id,
-            name=row["name"],
-            email=row["email"],
-            role=row["role"],
-            company=company,
-            preferred_language="en",
-        )
-        db.add(respondent)
-        db.flush()
-
-        submission = FeedbackSubmission(
-            respondent_id=respondent.id,
-            organization_id=org.id,
-            tools_used=row["tools_used"],
-            pain_points=row["pain_points"],
-            new_tool=row["new_tool"],
-            status="received",
-            priority="normal",
-            source_channel="web",
-            language="en",
-            consent_to_store=True,
-            is_anonymous=False,
-            created_at=row["created_at"] or datetime.utcnow(),
-            updated_at=row["created_at"] or datetime.utcnow(),
-        )
-        db.add(submission)
-        db.flush()
-
-        analysis = FeedbackAnalysis(
-            submission_id=submission.id,
-            model_version=intelligence.model_version,
-            category=row["category"],
-            confidence_score=None,
-            sentiment_label=row["sentiment_label"],
-            sentiment_score=row["sentiment_score"],
-            summary=row["summary"],
-            processing_status="completed",
-            needs_human_review=False,
-            created_at=row["created_at"] or datetime.utcnow(),
-            updated_at=row["created_at"] or datetime.utcnow(),
-        )
-        db.add(analysis)
-
-    db.commit()
 
 
 def get_feedback_query(db: Session):
@@ -322,15 +162,20 @@ def track_event(payload: TrackingEvent, request: Request, db: Session = Depends(
 
 
 @app.post("/feedback", response_model=FeedbackResponse)
-def create_feedback(payload: FeedbackCreate, request: Request, db: Session = Depends(get_db)):
+def create_feedback(
+    payload: FeedbackCreate,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db)
+):
     combined_text = " ".join(
         part for part in [
             payload.tools_used,
             payload.pain_points,
             payload.new_tool,
-        ]
+            ]
         if part
-    ).strip()
+        ).strip()
 
     category, confidence = intelligence.classify(combined_text)
     sentiment_label, sentiment_score = intelligence.sentiment(combined_text)
@@ -396,6 +241,15 @@ def create_feedback(payload: FeedbackCreate, request: Request, db: Session = Dep
         )
     )
     db.commit()
+
+    background_tasks.add_task(
+    intelligence.log_mlflow,
+    submission,
+    category,
+    confidence,
+    sentiment_label,
+    sentiment_score,
+    )
 
     db.refresh(submission)
     db.refresh(respondent)
@@ -536,7 +390,7 @@ def analytics_summary(db: Session = Depends(get_db)):
     )
 
     daily_visits = [
-        {"date": day, "count": count}
+        {"date": day.isoformat(), "count": count}
         for day, count in daily_rows
         if day is not None
     ]
@@ -564,13 +418,28 @@ def analytics_summary(db: Session = Depends(get_db)):
     )
 
 
-@app.get("/insights/summary", response_model=InsightResponse, dependencies=[Depends(require_admin_api_key)])
+@app.get("/insights/summary", dependencies=[Depends(require_admin_api_key)])
 def insights_summary(db: Session = Depends(get_db)):
     rows = get_feedback_query(db).all()
+
+    feedback_texts = []
     for row in rows:
-        row.latest_analysis = max(row.analyses, key=lambda item: item.created_at) if row.analyses else None
-    report = intelligence.build_insights(rows)
-    return InsightResponse(**report)
+        text = " ".join([
+            row.tools_used or "",
+            row.pain_points or "",
+            row.new_tool or "",
+        ])
+        feedback_texts.append(text.strip())
+
+    if llm_service.is_available():
+        report = llm_service.generate_insights(feedback_texts)
+        return report
+
+    # fallback to old ML
+    for row in rows:
+        row.latest_analysis = max(row.analyses, key=lambda x: x.created_at) if row.analyses else None
+
+    return intelligence.build_insights(rows)
 
 
 @app.post("/search", response_model=SearchResponse, dependencies=[Depends(require_admin_api_key)])

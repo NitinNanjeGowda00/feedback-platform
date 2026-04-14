@@ -6,13 +6,14 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 
 class FeedbackBase(BaseModel):
-    name: str
+    name: str = Field(..., max_length=100)
     email: EmailStr
-    role: str
-    company: str
-    tools_used: str
-    pain_points: str
-    new_tool: str
+    role: str = Field(..., max_length=100)
+    company: str = Field(..., max_length=150)
+    tools_used: str = Field(..., max_length=2000)
+    pain_points: str = Field(..., max_length=3000)
+    new_tool: str = Field(..., max_length=2000)
+
     source_channel: str = "web"
     language: str = "en"
     consent_to_store: bool = True
