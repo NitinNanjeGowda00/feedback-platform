@@ -1,28 +1,19 @@
 from __future__ import annotations
 
 from logging.config import fileConfig
-import os
 
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
-
-def get_database_url() -> str:
-    database_url = os.getenv("DATABASE_URL")
-    if not database_url:
-        raise RuntimeError("DATABASE_URL must be set before running Alembic migrations")
-    return normalize_database_url(database_url)
-
-from app.database import Base, normalize_database_url
+from app.database import Base, get_database_url
 from app import models  # noqa: F401
 
 config = context.config
 
-config.set_main_option("sqlalchemy.url", get_database_url())
-
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
+config.set_main_option("sqlalchemy.url", get_database_url())
 target_metadata = Base.metadata
 
 
@@ -39,7 +30,6 @@ def run_migrations_offline() -> None:
 
     with context.begin_transaction():
         context.run_migrations()
-
 
 
 def run_migrations_online() -> None:

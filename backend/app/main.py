@@ -124,9 +124,8 @@ def refresh_vector_store(db: Session) -> None:
 
 @app.on_event("startup")
 def on_startup():
-    if IS_SQLITE:
-        Base.metadata.create_all(bind=engine)
-        ensure_phase1_tables()
+    Base.metadata.create_all(bind=engine)
+    ensure_phase1_tables()
 
     db = SessionLocal()
     try:
