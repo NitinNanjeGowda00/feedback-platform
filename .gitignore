@@ -1,8 +1,26 @@
-node_modules
-.next
-.env
-.env.local
-venv
-__pycache__
+# Ignore everything
+*
+
+# Allow backend only
+!backend/
+!backend/**
+
+# Allow gitignore
+!.gitignore
+
+# Python
+venv/
+__pycache__/
 *.pyc
+
+# Env files
+.env
+.env.*
+
+# DB / artifacts
 *.db
+*.sqlite3
+
+# OS
+.DS_Store
+Thumbs.db
