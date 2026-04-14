@@ -65,7 +65,10 @@ app.add_middleware(
 )
 
 intelligence = IntelligenceEngine()
-vector_store = FeedbackVectorStore()
+try:
+    vector_store = FeedbackVectorStore()
+except Exception:
+    vector_store = None
 llm_service = LLMService()
 
 
@@ -125,13 +128,14 @@ def refresh_vector_store(db: Session) -> None:
 @app.on_event("startup")
 def on_startup():
     Base.metadata.create_all(bind=engine)
-    ensure_phase1_tables()
 
     db = SessionLocal()
     try:
         if IS_SQLITE:
             migrate_legacy_feedback(db)
-        refresh_vector_store(db)
+
+        if vector_store:
+            refresh_vector_store(db)
     finally:
         db.close()
 
@@ -257,7 +261,8 @@ def create_feedback(
     submission.analyses = [analysis]
     submission.latest_analysis = analysis
 
-    vector_store.add_feedback(submission)
+    if vector_store:
+        vector_store.add_feedback(submission)
     intelligence.log_mlflow(submission, category, confidence, sentiment_label, sentiment_score)
 
     return serialize_feedback(submission)
@@ -444,6 +449,6 @@ def insights_summary(db: Session = Depends(get_db)):
 @app.post("/search", response_model=SearchResponse, dependencies=[Depends(require_admin_api_key)])
 def semantic_search(payload: SearchRequest, db: Session = Depends(get_db)):
     _ = db
-    matches = vector_store.search(payload.query, payload.k)
+    matches = vector_store.search(payload.query, payload.k) if vector_store else []
     answer = intelligence.build_rag_answer(payload.query, matches)
     return SearchResponse(answer=answer, matches=matches)
