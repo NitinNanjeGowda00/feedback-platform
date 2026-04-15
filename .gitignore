@@ -1,26 +1,31 @@
-# Ignore everything
-*
-
-# Allow backend only
-!backend/
-!backend/**
-
-# Allow gitignore
-!.gitignore
-
 # Python
-venv/
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
 
-# Env files
+# Virtual env
+venv/
 .env
-.env.*
 
-# DB / artifacts
-*.db
-*.sqlite3
+# ML artifacts
+artifacts/
+*.joblib
 
 # OS
 .DS_Store
 Thumbs.db
+
+# Logs
+*.log
+
+# Node (frontend)
+node_modules/
+
+# Build
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
