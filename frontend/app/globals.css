@@ -1,0 +1,36 @@
+@import "tailwindcss";
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  background:
+    radial-gradient(circle at 20% 20%, rgba(255, 255, 255, 0.15), transparent 25%),
+    radial-gradient(circle at 80% 30%, rgba(255, 0, 150, 0.2), transparent 20%),
+    linear-gradient(135deg, #7c3aed 0%, #9333ea 40%, #6d28d9 100%);
+}
+
+/* Glass UI */
+.glass {
+  background: rgba(255, 255, 255, 0.11);
+  backdrop-filter: blur(22px);
+  -webkit-backdrop-filter: blur(22px);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 28px;
+}
+
+/* Glow */
+.glow {
+  box-shadow: 0 24px 80px rgba(16, 24, 40, 0.22);
+}
+
+/* Inputs */
+.input {
+  @apply w-full rounded-2xl border border-slate-200 bg-white px-5 py-4 text-[15px] text-slate-900 shadow-sm outline-none placeholder:text-slate-400 focus:border-fuchsia-300 focus:ring-4 focus:ring-fuchsia-100;
+}
+
+.textarea {
+  @apply w-full rounded-2xl border border-slate-200 bg-white px-5 py-4 text-[15px] text-slate-900 shadow-sm outline-none placeholder:text-slate-400 focus:border-sky-300 focus:ring-4 focus:ring-sky-100 resize-y;
+}
