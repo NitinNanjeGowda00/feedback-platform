@@ -114,3 +114,31 @@ class VisitorEvent(Base):
     user_agent: Mapped[str | None] = mapped_column(Text, nullable=True)
     ip_hash: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+class InsightSnapshot(Base):
+    __tablename__ = "insight_snapshots"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+
+    # When this snapshot was generated
+    date: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        index=True,
+        nullable=False
+    )
+
+    # AI outputs (stored as JSON string)
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    top_patterns: Mapped[str] = mapped_column(Text, nullable=False)  # JSON string
+    recommendations: Mapped[str] = mapped_column(Text, nullable=False)
+
+    # Analytics signals
+    sentiment_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    total_feedback: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False
+    )

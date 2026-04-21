@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from datetime import datetime
+import re
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 
 class FeedbackBase(BaseModel):
@@ -21,7 +22,34 @@ class FeedbackBase(BaseModel):
 
 
 class FeedbackCreate(FeedbackBase):
-    pass
+
+    # 🔥 MAIN VALIDATION (prevents garbage data)
+    @field_validator("pain_points")
+    def validate_pain_points(cls, v: str):
+        text = v.strip()
+
+        if len(text) < 10:
+            raise ValueError("Feedback too short")
+
+        if text.lower() in ["test", "string", "asdf", "qwerty"]:
+            raise ValueError("Invalid feedback content")
+
+        return text
+
+    # 🧠 Optional: validate tools_used
+    @field_validator("tools_used")
+    def validate_tools(cls, v: str):
+        return v.strip()
+
+    # 🧠 Optional: clean new_tool input
+    @field_validator("new_tool")
+    def validate_new_tool(cls, v: str):
+        return v.strip()
+
+    # 🔐 Optional: normalize name
+    @field_validator("name")
+    def clean_name(cls, v: str):
+        return re.sub(r"\s+", " ", v.strip())
 
 
 class RespondentResponse(BaseModel):

@@ -1,49 +1,27 @@
-# Backend
+# 🚀 AI Feedback Intelligence Platform
 
-## PostgreSQL-ready runtime
+An AI-powered backend system that collects, analyzes, and generates insights from user feedback.
 
-This backend now prefers PostgreSQL for normal runtime.
+## 🔥 Features
 
-### Environment setup
+- LLM-based feedback classification (OpenAI)
+- Sentiment analysis
+- Pattern detection & insights generation
+- Evidence-backed recommendations
+- PostgreSQL storage
+- FastAPI backend
 
-Copy `.env.example` to `.env` and set:
+## 🧠 Tech Stack
 
-- `DATABASE_URL`
-- `ADMIN_API_KEY`
-- `IP_HASH_SALT`
+- FastAPI
+- PostgreSQL
+- OpenAI API
+- Scikit-learn
+- LangChain (optional)
 
-Example PostgreSQL URL:
-
-```bash
-postgresql+psycopg://postgres:postgres@localhost:5432/feedback_app
-```
-
-Legacy `postgres://` URLs are normalized automatically. If your host requires TLS, set `DATABASE_SSLMODE=require`.
-
-### Migrations
-
-Run schema migrations with:
+## ⚙️ Setup
 
 ```bash
-alembic upgrade head
-```
-
-Optional validation commands:
-
-```bash
-alembic current
-alembic heads
-```
-
-Do not rely on startup schema creation in PostgreSQL mode. PostgreSQL runtime expects Alembic-managed schema.
-
-### Local legacy SQLite mode
-
-SQLite is still supported only as a compatibility path for older local data.
-When using SQLite, startup will create compatibility tables and migrate old `feedback` rows into the new structure.
-
-### Run
-
-```bash
+cd backend
+pip install -r requirements.txt
 uvicorn app.main:app --reload
-```
