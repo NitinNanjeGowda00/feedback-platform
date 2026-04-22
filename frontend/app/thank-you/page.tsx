@@ -1,10 +1,10 @@
 "use client";
 
 import Link from "next/link";
+import { Suspense, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
-import { useEffect } from "react";
 
-export default function ThankYouPage() {
+function ThankYouContent() {
   const searchParams = useSearchParams();
   const submissionId = searchParams.get("submissionId");
 
@@ -227,5 +227,13 @@ export default function ThankYouPage() {
         }
       `}</style>
     </main>
+  );
+}
+
+export default function ThankYouPage() {
+  return (
+    <Suspense fallback={<main className="min-h-screen px-4 py-12" />}>
+      <ThankYouContent />
+    </Suspense>
   );
 }
