@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { backendBaseUrl } from "../admin/_auth";
+import { backendBaseUrl } from "@/lib/backend-admin";
 
 export async function POST(req: NextRequest) {
     try {

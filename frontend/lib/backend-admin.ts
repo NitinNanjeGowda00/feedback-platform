@@ -6,17 +6,34 @@ import {
     SearchResponse,
 } from "./admin-types";
 
-const BACKEND_BASE =
-    process.env.BACKEND_API_BASE_URL ??
-    process.env.NEXT_PUBLIC_FEEDBACK_API_BASE_URL ??
-    "https://feedback-platform-production.up.railway.app";
+/**
+ * Resolve backend base URL from env
+ */
+export function backendBaseUrl() {
+    const url =
+        process.env.BACKEND_API_BASE_URL ??
+        process.env.NEXT_PUBLIC_FEEDBACK_API_BASE_URL ??
+        "https://feedback-platform-production.up.railway.app";
+
+    if (!url) {
+        throw new Error("BACKEND_API_BASE_URL is not configured");
+    }
+
+    return url.replace(/\/$/, "");
+}
 
 const ADMIN_API_KEY = process.env.ADMIN_API_KEY ?? "";
 
+/**
+ * Build full backend URL
+ */
 function backendUrl(path: string) {
-    return `${BACKEND_BASE.replace(/\/$/, "")}${path}`;
+    return `${backendBaseUrl()}${path}`;
 }
 
+/**
+ * Default headers for admin requests
+ */
 function authHeaders(extra?: HeadersInit) {
     return {
         accept: "application/json",
@@ -25,6 +42,9 @@ function authHeaders(extra?: HeadersInit) {
     };
 }
 
+/**
+ * Ensure response is OK
+ */
 async function ensureOk(res: Response) {
     if (res.ok) return;
 
@@ -32,6 +52,9 @@ async function ensureOk(res: Response) {
     throw new Error(text || `Backend request failed (${res.status})`);
 }
 
+/**
+ * Generic GET
+ */
 export async function backendGetJson<T>(path: string): Promise<T> {
     const res = await fetch(backendUrl(path), {
         headers: authHeaders(),
@@ -42,6 +65,9 @@ export async function backendGetJson<T>(path: string): Promise<T> {
     return res.json() as Promise<T>;
 }
 
+/**
+ * Generic POST
+ */
 export async function backendPostJson<T>(
     path: string,
     body: unknown,
@@ -59,6 +85,9 @@ export async function backendPostJson<T>(
     return res.json() as Promise<T>;
 }
 
+/**
+ * Raw request (for file downloads etc.)
+ */
 export async function backendRaw(path: string): Promise<Response> {
     const res = await fetch(backendUrl(path), {
         headers: authHeaders(),
@@ -69,6 +98,9 @@ export async function backendRaw(path: string): Promise<Response> {
     return res;
 }
 
+/**
+ * Domain-specific APIs
+ */
 export async function getFeedback() {
     return backendGetJson<FeedbackItem[]>("/feedback");
 }
