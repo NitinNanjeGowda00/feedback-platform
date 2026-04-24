@@ -60,18 +60,9 @@ app = FastAPI(title="AI Feedback Intelligence API")
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(RateLimitMiddleware)
 
-cors_origins = [
-    origin.strip()
-    for origin in os.getenv(
-        "CORS_ORIGINS",
-        "https://feedback-platform-eight.vercel.app,http://localhost:3000",
-    ).split(",")
-    if origin.strip()
-]
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=cors_origins,
+    allow_origin_regex=r"https://.*\.vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
