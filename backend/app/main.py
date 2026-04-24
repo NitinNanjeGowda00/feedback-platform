@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dotenv import load_dotenv
+
 load_dotenv()
 
 import csv
@@ -63,7 +64,7 @@ cors_origins = [
     origin.strip()
     for origin in os.getenv(
         "CORS_ORIGINS",
-        "https://feedback-platform-neon.vercel.app,http://localhost:3000",
+        "https://feedback-platform-eight.vercel.app,http://localhost:3000",
     ).split(",")
     if origin.strip()
 ]
@@ -160,10 +161,14 @@ def serialize_feedback(submission: FeedbackSubmission) -> FeedbackResponse:
         created_at=submission.created_at,
         updated_at=submission.updated_at,
         archived_at=submission.archived_at,
-        respondent=RespondentResponse.model_validate(respondent) if respondent else None,
-        latest_analysis=FeedbackAnalysisResponse.model_validate(latest_analysis)
-        if latest_analysis
-        else None,
+        respondent=(
+            RespondentResponse.model_validate(respondent) if respondent else None
+        ),
+        latest_analysis=(
+            FeedbackAnalysisResponse.model_validate(latest_analysis)
+            if latest_analysis
+            else None
+        ),
     )
 
 
@@ -213,13 +218,17 @@ def _average_sentiment_score(rows) -> float:
     return round(sum(scores) / len(scores), 4)
 
 
-def _normalize_insight_report(report: dict[str, Any], rows_count: int) -> dict[str, Any]:
+def _normalize_insight_report(
+    report: dict[str, Any], rows_count: int
+) -> dict[str, Any]:
     report = dict(report or {})
 
     if "summary" not in report or not str(report.get("summary", "")).strip():
         report["summary"] = "No insight summary available."
 
-    if "recommendations" not in report or not isinstance(report.get("recommendations"), list):
+    if "recommendations" not in report or not isinstance(
+        report.get("recommendations"), list
+    ):
         report["recommendations"] = []
 
     if "top_patterns" not in report:
@@ -241,7 +250,9 @@ def _normalize_insight_report(report: dict[str, Any], rows_count: int) -> dict[s
 
 def _snapshot_to_report(snapshot: InsightSnapshot) -> dict[str, Any]:
     try:
-        top_patterns = json.loads(snapshot.top_patterns) if snapshot.top_patterns else []
+        top_patterns = (
+            json.loads(snapshot.top_patterns) if snapshot.top_patterns else []
+        )
     except Exception:
         top_patterns = []
 
@@ -263,9 +274,12 @@ def _snapshot_to_report(snapshot: InsightSnapshot) -> dict[str, Any]:
     }
 
 
-def store_insight_snapshot(db: Session, report: dict[str, Any], total_feedback: int) -> InsightSnapshot:
+def store_insight_snapshot(
+    db: Session, report: dict[str, Any], total_feedback: int
+) -> InsightSnapshot:
     snapshot = InsightSnapshot(
-        summary=str(report.get("summary", "")).strip() or "No insight summary available.",
+        summary=str(report.get("summary", "")).strip()
+        or "No insight summary available.",
         top_patterns=json.dumps(report.get("top_patterns", []), default=str),
         recommendations=json.dumps(report.get("recommendations", []), default=str),
         sentiment_score=_average_sentiment_score(get_feedback_query(db).all()),
@@ -355,7 +369,9 @@ def health():
 
 
 @app.post("/track")
-def track_event(payload: TrackingEvent, request: Request, db: Session = Depends(get_db)):
+def track_event(
+    payload: TrackingEvent, request: Request, db: Session = Depends(get_db)
+):
     event = VisitorEvent(
         event_name=payload.event_name or "page_view",
         path=payload.path or request.url.path,
@@ -397,7 +413,7 @@ def create_feedback(
             "confidence": confidence,
             "model_version": model_version,  # 🔥 NEW
             "needs_human_review": needs_human_review,
-            }
+        }
     )
 
     company_name = payload.company.strip() or "Independent"
@@ -481,7 +497,11 @@ def create_feedback(
     return serialize_feedback(submission)
 
 
-@app.get("/feedback", response_model=list[FeedbackResponse], dependencies=[Depends(require_admin_api_key)])
+@app.get(
+    "/feedback",
+    response_model=list[FeedbackResponse],
+    dependencies=[Depends(require_admin_api_key)],
+)
 def list_feedback(db: Session = Depends(get_db)):
     rows = get_feedback_query(db).all()
     return [serialize_feedback(row) for row in rows]
@@ -551,13 +571,17 @@ def export_feedback(db: Session = Depends(get_db)):
                 item.consent_to_store,
                 item.is_anonymous,
                 latest_analysis.category if latest_analysis else "",
-                latest_analysis.confidence_score
-                if latest_analysis and latest_analysis.confidence_score is not None
-                else "",
+                (
+                    latest_analysis.confidence_score
+                    if latest_analysis and latest_analysis.confidence_score is not None
+                    else ""
+                ),
                 latest_analysis.sentiment_label if latest_analysis else "",
-                latest_analysis.sentiment_score
-                if latest_analysis and latest_analysis.sentiment_score is not None
-                else "",
+                (
+                    latest_analysis.sentiment_score
+                    if latest_analysis and latest_analysis.sentiment_score is not None
+                    else ""
+                ),
                 latest_analysis.summary if latest_analysis else "",
                 latest_analysis.processing_status if latest_analysis else "",
                 latest_analysis.needs_human_review if latest_analysis else "",
@@ -575,17 +599,22 @@ def export_feedback(db: Session = Depends(get_db)):
     )
 
 
-@app.get("/analytics/summary", response_model=AnalyticsResponse, dependencies=[Depends(require_admin_api_key)])
+@app.get(
+    "/analytics/summary",
+    response_model=AnalyticsResponse,
+    dependencies=[Depends(require_admin_api_key)],
+)
 def analytics_summary(db: Session = Depends(get_db)):
     total_responses = db.query(FeedbackSubmission).count()
 
-    page_views = db.query(VisitorEvent).filter(
-        VisitorEvent.event_name == "page_view"
-    ).count()
+    page_views = (
+        db.query(VisitorEvent).filter(VisitorEvent.event_name == "page_view").count()
+    )
 
-    submissions = db.query(VisitorEvent).filter(
-        VisitorEvent.event_name == "submission"
-    ).count() or total_responses
+    submissions = (
+        db.query(VisitorEvent).filter(VisitorEvent.event_name == "submission").count()
+        or total_responses
+    )
 
     conversion_rate = round((submissions / page_views) * 100, 2) if page_views else 0.0
 
@@ -654,9 +683,7 @@ def analytics_summary(db: Session = Depends(get_db)):
 @app.get("/insights/summary", dependencies=[Depends(require_admin_api_key)])
 def insights_summary(db: Session = Depends(get_db)):
     latest_snapshot = (
-        db.query(InsightSnapshot)
-        .order_by(InsightSnapshot.date.desc())
-        .first()
+        db.query(InsightSnapshot).order_by(InsightSnapshot.date.desc()).first()
     )
 
     if latest_snapshot:
@@ -670,13 +697,17 @@ def insights_summary(db: Session = Depends(get_db)):
 def ai_metrics(db: Session = Depends(get_db)):
     total = db.query(FeedbackAnalysis).count()
 
-    low_conf = db.query(FeedbackAnalysis).filter(
-        FeedbackAnalysis.confidence_score < 0.5
-    ).count()
+    low_conf = (
+        db.query(FeedbackAnalysis)
+        .filter(FeedbackAnalysis.confidence_score < 0.5)
+        .count()
+    )
 
-    needs_review = db.query(FeedbackAnalysis).filter(
-        FeedbackAnalysis.needs_human_review == True
-    ).count()
+    needs_review = (
+        db.query(FeedbackAnalysis)
+        .filter(FeedbackAnalysis.needs_human_review == True)
+        .count()
+    )
 
     return {
         "total": total,
@@ -685,7 +716,11 @@ def ai_metrics(db: Session = Depends(get_db)):
     }
 
 
-@app.post("/search", response_model=SearchResponse, dependencies=[Depends(require_admin_api_key)])
+@app.post(
+    "/search",
+    response_model=SearchResponse,
+    dependencies=[Depends(require_admin_api_key)],
+)
 def semantic_search(payload: SearchRequest, db: Session = Depends(get_db)):
     _ = db
     matches = vector_store.search(payload.query, payload.k) if vector_store else []
